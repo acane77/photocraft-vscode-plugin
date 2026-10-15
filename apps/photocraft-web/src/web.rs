@@ -1,4 +1,9 @@
 //! The browser shell: web `Services`, drag-and-drop, and the eframe web runner.
+//!
+//! A VS Code webview (`packaging/vscode`) is the same page: [`host`] receives the opened file
+//! and sends saves back. In a normal browser that channel is absent.
+
+mod host;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -97,7 +102,8 @@ pub fn start() {
                     }
                     let unsaved = Arc::new(AtomicBool::new(false));
                     guard_unload(unsaved.clone());
-                    Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets }))
+                    let host = host::install(cc.egui_ctx.clone());
+                    Ok(Box::new(WebShell { app, inbox, unsaved, served, database, presets, host }))
                 }),
             )
             .await;
@@ -199,6 +205,15 @@ fn browser_languages() -> Vec<String> {
 /// GET `url` (relative to the page) and read the whole body. With `integrity` (a Subresource
 /// Integrity value), the browser rejects a body whose hash differs.
 async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, String> {
+    fetch_limited(url, integrity, None).await
+}
+
+/// [`fetch_bytes`] that refuses a body larger than `max` (the editor host's file cap).
+pub(crate) async fn fetch_capped(url: &str, max: usize) -> Result<Vec<u8>, String> {
+    fetch_limited(url, None, Some(max)).await
+}
+
+async fn fetch_limited(url: &str, integrity: Option<&str>, max: Option<usize>) -> Result<Vec<u8>, String> {
     use wasm_bindgen_futures::JsFuture;
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
@@ -214,8 +229,24 @@ async fn fetch_bytes(url: &str, integrity: Option<&str>) -> Result<Vec<u8>, Stri
     if !resp.ok() {
         return Err(format!("HTTP {}", resp.status()));
     }
+    if let (Some(max), Some(declared)) = (max, content_length(&resp))
+        && declared > max as u64
+    {
+        return Err(format!("file is too large ({declared} bytes; at most {max})"));
+    }
     let body = JsFuture::from(resp.array_buffer().map_err(js)?).await.map_err(js)?;
-    Ok(js_sys::Uint8Array::new(&body).to_vec())
+    let bytes = js_sys::Uint8Array::new(&body).to_vec();
+    if let Some(max) = max
+        && bytes.len() > max
+    {
+        return Err(format!("file is too large ({} bytes; at most {max})", bytes.len()));
+    }
+    Ok(bytes)
+}
+
+fn content_length(resp: &web_sys::Response) -> Option<u64> {
+    let value = resp.headers().get("content-length").ok().flatten()?;
+    value.trim().parse().ok()
 }
 
 /// Wraps the app to read dropped files asynchronously (browsers can't read them synchronously,
@@ -228,6 +259,8 @@ struct WebShell {
     served: Served,
     database: Option<web_sys::IdbDatabase>,
     presets: crate::preset_bridge::Bridge,
+    /// Opened file and Ctrl+S from a VS Code webview. Idle in a normal browser tab.
+    host: std::sync::Arc<host::HostBridge>,
 }
 
 impl WebShell {
@@ -282,8 +315,32 @@ impl WebShell {
     }
 }
 
+impl WebShell {
+    /// Open files the editor host delivered. `open_file` remembers the name, so File › Save
+    /// writes that format back through [`download`] (which the host then stores).
+    fn open_from_host(&mut self) {
+        for (name, bytes) in self.host.take_opens() {
+            if let Err(err) = self.app.open_file(&name, &bytes) {
+                host::notify_error(&format!("Couldn't open {name}: {err}"));
+                self.app.open_failed(&name, &err);
+            }
+        }
+    }
+
+    fn save_for_host(&mut self) {
+        let Some(name) = self.host.save_name() else {
+            host::notify_error("PhotoCraft has not opened a file in this editor yet");
+            return;
+        };
+        if let Err(err) = self.app.save_as(Some(name)) {
+            host::notify_error(&err);
+        }
+    }
+}
+
 impl eframe::App for WebShell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.open_from_host();
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
             let inbox = self.inbox.clone();
@@ -301,6 +358,9 @@ impl eframe::App for WebShell {
         }
         self.serve_fonts(ctx);
         self.app.logic(ctx, frame);
+        if self.host.take_save() {
+            self.save_for_host();
+        }
         self.save_presets(ctx);
     }
 
@@ -398,7 +458,12 @@ fn local_storage() -> Option<web_sys::Storage> {
 }
 
 /// Trigger a browser download of `bytes` named after the last component of `path`.
+/// Inside a VS Code webview the extension stores the bytes instead; a download there
+/// would not land on the opened workspace file.
 fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
+    if host::publish(path, bytes) {
+        return Ok(());
+    }
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "photocraft".into());
     let window = web_sys::window().ok_or("no window")?;

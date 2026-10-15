@@ -13,8 +13,14 @@
 //!
 //! URL query flags: `?cpu` forces the CPU canvas path (same as `PHOTOCRAFT_CPU_CANVAS=1`);
 //! `?webgl` forces the WebGL2 backend instead of WebGPU.
+//!
+//! The code-server extension (`packaging/vscode`) loads this same page in a custom editor
+//! and passes it the opened PSD or image. See `host_file`.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
+#[cfg(any(target_arch = "wasm32", test))]
+mod host_file;
 
 #[cfg(any(target_arch = "wasm32", test))]
 mod preset_bridge;

@@ -3,6 +3,8 @@ plan/
 /target
 target/
 /dist
+# Trunk output copied into the VS Code extension while packaging (`packaging/vscode/package.sh`).
+/packaging/vscode/media/
 /corpus
 /log
 /secrets

@@ -1,0 +1,315 @@
+{
+  "name": "photocraft",
+  "displayName": "PhotoCraft",
+  "description": "Open PSD files and other images in PhotoCraft inside VS Code and code-server.",
+  "version": "0.9.0",
+  "publisher": "storytold",
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCustomEditor:ai.storyteller.photocraft.editor"
+  ],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "ai.storyteller.photocraft.editor",
+        "displayName": "PhotoCraft",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "*.pcraft"
+          },
+          {
+            "filenamePattern": "*.pdn"
+          },
+          {
+            "filenamePattern": "*.ora"
+          },
+          {
+            "filenamePattern": "*.kra"
+          },
+          {
+            "filenamePattern": "*.krz"
+          },
+          {
+            "filenamePattern": "*.psd"
+          },
+          {
+            "filenamePattern": "*.psb"
+          },
+          {
+            "filenamePattern": "*.psdt"
+          },
+          {
+            "filenamePattern": "*.png"
+          },
+          {
+            "filenamePattern": "*.jpg"
+          },
+          {
+            "filenamePattern": "*.jpeg"
+          },
+          {
+            "filenamePattern": "*.tif"
+          },
+          {
+            "filenamePattern": "*.tiff"
+          },
+          {
+            "filenamePattern": "*.webp"
+          },
+          {
+            "filenamePattern": "*.gif"
+          },
+          {
+            "filenamePattern": "*.bmp"
+          },
+          {
+            "filenamePattern": "*.tga"
+          },
+          {
+            "filenamePattern": "*.ico"
+          },
+          {
+            "filenamePattern": "*.qoi"
+          },
+          {
+            "filenamePattern": "*.exr"
+          },
+          {
+            "filenamePattern": "*.hdr"
+          },
+          {
+            "filenamePattern": "*.pbm"
+          },
+          {
+            "filenamePattern": "*.pgm"
+          },
+          {
+            "filenamePattern": "*.ppm"
+          },
+          {
+            "filenamePattern": "*.pam"
+          },
+          {
+            "filenamePattern": "*.pfm"
+          },
+          {
+            "filenamePattern": "*.dds"
+          },
+          {
+            "filenamePattern": "*.fits"
+          },
+          {
+            "filenamePattern": "*.fit"
+          },
+          {
+            "filenamePattern": "*.fts"
+          },
+          {
+            "filenamePattern": "*.dpx"
+          },
+          {
+            "filenamePattern": "*.cin"
+          },
+          {
+            "filenamePattern": "*.heic"
+          },
+          {
+            "filenamePattern": "*.heif"
+          },
+          {
+            "filenamePattern": "*.hif"
+          },
+          {
+            "filenamePattern": "*.dng"
+          },
+          {
+            "filenamePattern": "*.cr2"
+          },
+          {
+            "filenamePattern": "*.cr3"
+          },
+          {
+            "filenamePattern": "*.nef"
+          },
+          {
+            "filenamePattern": "*.nrw"
+          },
+          {
+            "filenamePattern": "*.arw"
+          },
+          {
+            "filenamePattern": "*.pef"
+          },
+          {
+            "filenamePattern": "*.orf"
+          },
+          {
+            "filenamePattern": "*.rw2"
+          },
+          {
+            "filenamePattern": "*.raf"
+          },
+          {
+            "filenamePattern": "*.svg"
+          },
+          {
+            "filenamePattern": "*.svgz"
+          },
+          {
+            "filenamePattern": "*.af"
+          },
+          {
+            "filenamePattern": "*.afdesign"
+          },
+          {
+            "filenamePattern": "*.afphoto"
+          },
+          {
+            "filenamePattern": "*.afpub"
+          },
+          {
+            "filenamePattern": "*.PSD"
+          },
+          {
+            "filenamePattern": "*.PSB"
+          },
+          {
+            "filenamePattern": "*.PSDT"
+          },
+          {
+            "filenamePattern": "*.PNG"
+          },
+          {
+            "filenamePattern": "*.JPG"
+          },
+          {
+            "filenamePattern": "*.JPEG"
+          },
+          {
+            "filenamePattern": "*.TIF"
+          },
+          {
+            "filenamePattern": "*.TIFF"
+          },
+          {
+            "filenamePattern": "*.WEBP"
+          },
+          {
+            "filenamePattern": "*.GIF"
+          },
+          {
+            "filenamePattern": "*.BMP"
+          },
+          {
+            "filenamePattern": "*.HEIC"
+          },
+          {
+            "filenamePattern": "*.HEIF"
+          },
+          {
+            "filenamePattern": "*.DNG"
+          },
+          {
+            "filenamePattern": "*.SVG"
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "photocraft.save",
+        "title": "PhotoCraft: Save",
+        "enablement": "activeCustomEditorId == 'ai.storyteller.photocraft.editor'"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "photocraft.save",
+        "key": "ctrl+s",
+        "mac": "cmd+s",
+        "when": "activeCustomEditorId == 'ai.storyteller.photocraft.editor'"
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.editorAssociations": {
+        "*.pcraft": "ai.storyteller.photocraft.editor",
+        "*.pdn": "ai.storyteller.photocraft.editor",
+        "*.ora": "ai.storyteller.photocraft.editor",
+        "*.kra": "ai.storyteller.photocraft.editor",
+        "*.krz": "ai.storyteller.photocraft.editor",
+        "*.psd": "ai.storyteller.photocraft.editor",
+        "*.psb": "ai.storyteller.photocraft.editor",
+        "*.psdt": "ai.storyteller.photocraft.editor",
+        "*.png": "ai.storyteller.photocraft.editor",
+        "*.jpg": "ai.storyteller.photocraft.editor",
+        "*.jpeg": "ai.storyteller.photocraft.editor",
+        "*.tif": "ai.storyteller.photocraft.editor",
+        "*.tiff": "ai.storyteller.photocraft.editor",
+        "*.webp": "ai.storyteller.photocraft.editor",
+        "*.gif": "ai.storyteller.photocraft.editor",
+        "*.bmp": "ai.storyteller.photocraft.editor",
+        "*.tga": "ai.storyteller.photocraft.editor",
+        "*.ico": "ai.storyteller.photocraft.editor",
+        "*.qoi": "ai.storyteller.photocraft.editor",
+        "*.exr": "ai.storyteller.photocraft.editor",
+        "*.hdr": "ai.storyteller.photocraft.editor",
+        "*.pbm": "ai.storyteller.photocraft.editor",
+        "*.pgm": "ai.storyteller.photocraft.editor",
+        "*.ppm": "ai.storyteller.photocraft.editor",
+        "*.pam": "ai.storyteller.photocraft.editor",
+        "*.pfm": "ai.storyteller.photocraft.editor",
+        "*.dds": "ai.storyteller.photocraft.editor",
+        "*.fits": "ai.storyteller.photocraft.editor",
+        "*.fit": "ai.storyteller.photocraft.editor",
+        "*.fts": "ai.storyteller.photocraft.editor",
+        "*.dpx": "ai.storyteller.photocraft.editor",
+        "*.cin": "ai.storyteller.photocraft.editor",
+        "*.heic": "ai.storyteller.photocraft.editor",
+        "*.heif": "ai.storyteller.photocraft.editor",
+        "*.hif": "ai.storyteller.photocraft.editor",
+        "*.dng": "ai.storyteller.photocraft.editor",
+        "*.cr2": "ai.storyteller.photocraft.editor",
+        "*.cr3": "ai.storyteller.photocraft.editor",
+        "*.nef": "ai.storyteller.photocraft.editor",
+        "*.nrw": "ai.storyteller.photocraft.editor",
+        "*.arw": "ai.storyteller.photocraft.editor",
+        "*.pef": "ai.storyteller.photocraft.editor",
+        "*.orf": "ai.storyteller.photocraft.editor",
+        "*.rw2": "ai.storyteller.photocraft.editor",
+        "*.raf": "ai.storyteller.photocraft.editor",
+        "*.svg": "ai.storyteller.photocraft.editor",
+        "*.svgz": "ai.storyteller.photocraft.editor",
+        "*.af": "ai.storyteller.photocraft.editor",
+        "*.afdesign": "ai.storyteller.photocraft.editor",
+        "*.afphoto": "ai.storyteller.photocraft.editor",
+        "*.afpub": "ai.storyteller.photocraft.editor",
+        "*.PSD": "ai.storyteller.photocraft.editor",
+        "*.PSB": "ai.storyteller.photocraft.editor",
+        "*.PSDT": "ai.storyteller.photocraft.editor",
+        "*.PNG": "ai.storyteller.photocraft.editor",
+        "*.JPG": "ai.storyteller.photocraft.editor",
+        "*.JPEG": "ai.storyteller.photocraft.editor",
+        "*.TIF": "ai.storyteller.photocraft.editor",
+        "*.TIFF": "ai.storyteller.photocraft.editor",
+        "*.WEBP": "ai.storyteller.photocraft.editor",
+        "*.GIF": "ai.storyteller.photocraft.editor",
+        "*.BMP": "ai.storyteller.photocraft.editor",
+        "*.HEIC": "ai.storyteller.photocraft.editor",
+        "*.HEIF": "ai.storyteller.photocraft.editor",
+        "*.DNG": "ai.storyteller.photocraft.editor",
+        "*.SVG": "ai.storyteller.photocraft.editor"
+      }
+    }
+  }
+}
