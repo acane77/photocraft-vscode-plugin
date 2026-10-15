@@ -9,6 +9,59 @@
 /// `packaging/vscode/host.js` (1 GiB). Larger reads are refused before they are queued.
 pub const MAX_HOST_FILE_BYTES: usize = 1024 * 1024 * 1024;
 
+/// Where a save inside the VS Code editor is written.
+///
+/// The page encodes this in the path it asks the extension to write. A bare file name is
+/// not a destination: matching the opened file's name must not overwrite it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostSaveDest {
+    /// The workspace file this editor was opened on.
+    Editor { name: String },
+    /// A file the user chose in VS Code's save dialog. `token` is the 32 hex id the
+    /// extension stored with that choice.
+    Picked { token: String, name: String },
+}
+
+/// Path remembered for the document opened from the editor, so File › Save writes that
+/// file back and nothing else does.
+pub fn editor_path(name: &str) -> Result<String, &'static str> {
+    Ok(format!("vscode-host/{}", host_file_name(name)?))
+}
+
+/// Path remembered after the user picks a file in VS Code's save dialog.
+pub fn picked_path(token: &str, name: &str) -> Result<String, &'static str> {
+    if !same_nonce(token, token) {
+        return Err("bad save token");
+    }
+    Ok(format!("vscode-picked/{token}/{}", host_file_name(name)?))
+}
+
+/// Decode a path produced by [`editor_path`] or [`picked_path`]. Any other path is refused,
+/// so a save cannot land on the opened file just because the names match.
+pub fn host_save_dest(path: &str) -> Result<HostSaveDest, &'static str> {
+    let path = path.trim();
+    if let Some(rest) = path.strip_prefix("vscode-host/") {
+        return Ok(HostSaveDest::Editor { name: single_name(rest)? });
+    }
+    if let Some(rest) = path.strip_prefix("vscode-picked/") {
+        let Some((token, name)) = rest.split_once('/') else {
+            return Err("bad save path");
+        };
+        if !same_nonce(token, token) {
+            return Err("bad save token");
+        }
+        return Ok(HostSaveDest::Picked { token: token.to_string(), name: single_name(name)? });
+    }
+    Err("not a host save")
+}
+
+fn single_name(name: &str) -> Result<String, &'static str> {
+    if name.contains('/') || name.contains('\\') {
+        return Err("bad save path");
+    }
+    host_file_name(name)
+}
+
 /// The file name to open and, on save, to write. Directory components are dropped so a
 /// message cannot escape the opened file's folder. Empty names, `.` and `..` are refused.
 pub fn host_file_name(name: &str) -> Result<String, &'static str> {
@@ -81,6 +134,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn save_paths_name_the_editor_file_or_a_dialog_choice() {
+        assert_eq!(editor_path("dir/photo.psd").as_deref(), Ok("vscode-host/photo.psd"));
+        assert_eq!(editor_path(r"C:\pics\photo.PSD").as_deref(), Ok("vscode-host/photo.PSD"));
+        assert!(editor_path("..").is_err());
+        let token = "0123456789abcdef0123456789abcdef";
+        assert_eq!(picked_path(token, "dir/leaf.png").as_deref(), Ok("vscode-picked/0123456789abcdef0123456789abcdef/leaf.png"));
+        assert!(picked_path("short", "leaf.png").is_err());
+        assert!(picked_path(&"g".repeat(32), "leaf.png").is_err());
+        assert_eq!(host_save_dest("vscode-host/photo.psd"), Ok(HostSaveDest::Editor { name: "photo.psd".into() }));
+        assert_eq!(
+            host_save_dest("vscode-picked/0123456789abcdef0123456789abcdef/leaf.png"),
+            Ok(HostSaveDest::Picked { token: token.into(), name: "leaf.png".into() })
+        );
+        assert!(host_save_dest("photo.psd").is_err());
+        assert!(host_save_dest("vscode-host/../photo.psd").is_err());
+        assert!(host_save_dest("vscode-host/a/photo.psd").is_err());
+        assert!(host_save_dest("vscode-picked/not-a-token/leaf.png").is_err());
+        assert!(host_save_dest("vscode-picked/0123456789abcdef0123456789abcdef/dir/leaf.png").is_err());
+    }
+
+    #[test]
     fn file_names_drop_directories_and_refuse_empties() {
         assert_eq!(host_file_name("dir/photo.psd").as_deref(), Ok("photo.psd"));
         assert_eq!(host_file_name(r"C:\pics\photo.PSD").as_deref(), Ok("photo.PSD"));
@@ -139,6 +213,9 @@ mod tests {
         assert!(extension.contains("registerCustomEditorProvider"), "editor provider");
         assert!(extension.contains("require(\"./host\")") || extension.contains("require('./host')"), "shim import");
         assert!(shim.contains("1024 * 1024 * 1024"), "size cap shared with the page");
+        assert!(extension.contains("showSaveDialog"), "Save As and Export use VS Code's save dialog");
+        assert!(extension.contains("dest === 'editor'"), "only an in-place save addresses the opened file");
+        assert!(!extension.contains("base === current"), "a matching file name must not overwrite the opened file");
         assert_eq!(MAX_HOST_FILE_BYTES, 1024 * 1024 * 1024);
         for ext in ["psd", "psb", "psdt", "pcraft", "png", "jpg", "jpeg", "tif", "tiff", "webp", "gif", "bmp", "svg"] {
             assert!(pkg.contains(&format!("*.{ext}")), "{ext} is not a custom-editor pattern");

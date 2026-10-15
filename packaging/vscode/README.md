@@ -15,8 +15,11 @@ code-server --install-extension dist/release/photocraft-<version>.vsix
 ```
 
 Reload the window. Opening a `.psd` (or another associated format) starts PhotoCraft in the
-editor. File › Save inside PhotoCraft, and Ctrl+S / Cmd+S while that editor is focused, write
-the file back. Saving under a different name writes a sibling of the opened file.
+editor. File › Save, and Ctrl+S / Cmd+S while that editor is focused, write the current
+document's own file and do not ask. That is the opened file, or the file you already chose
+for a document you created beside it. A new document with no file yet uses VS Code's save
+dialog. Save As, Save a Copy, and Export always open that dialog.
+They do not overwrite the opened file unless you pick it there.
 
 `--skip-build` packs an existing `dist/web` from `trunk build --release` in `apps/photocraft-web`.
 The script needs `trunk`, the `wasm32-unknown-unknown` target, and `node` (it runs `npx @vscode/vsce`).

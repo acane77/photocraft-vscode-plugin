@@ -148,6 +148,20 @@ fn workspace_name(id: &str) -> Option<&'static str> {
     })
 }
 
+/// The active document's flat file, when File › Save on the web can write it without asking.
+/// Layered files are decided separately (in place when they hold the document, otherwise Save As).
+#[cfg(any(target_arch = "wasm32", test))]
+fn flat_save_path(st: &photocraft_engine::DocState) -> Option<String> {
+    let path = st.path.clone()?;
+    if photocraft_engine::file_cmds::saves_in_place(&path) {
+        return None;
+    }
+    let ext = photocraft_engine::file_cmds::extension(&path)?;
+    let writable = matches!(ext.as_str(), "tif" | "tiff")
+        || (crate::plain_raster(&st.doc).is_some() && photocraft_codecs::from_extension(&ext).is_some_and(|format| format.caps().write));
+    writable.then_some(path)
+}
+
 /// Run a command id from any source (menu, shortcut, palette, automation).
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
     if app.automation_input
@@ -326,7 +340,16 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                         }
                         // A flat file asks for its name; confirming its own file records a
                         // plain Save that writes the file an action is played on (#3531).
-                        _ => app.save_dialog_flow(None, tga_bits, true),
+                        // On the web, Save of a flat file that can hold the document (a plain
+                        // PNG, JPEG, …) writes that file. A new document, or one the flat file
+                        // can't hold, still asks.
+                        _ => {
+                            #[cfg(target_arch = "wasm32")]
+                            if let Some(path) = app.session.active().and_then(flat_save_path) {
+                                return app.save_in_place(path);
+                            }
+                            app.save_dialog_flow(None, tga_bits, true)
+                        }
                     }
                 }
             }
@@ -2230,6 +2253,53 @@ mod reveal_label_tests {
         assert_eq!(translated_menu_label(de, reveal[0]), expected);
         // The menu catalogue (and docs/parity-checklist.md) keeps Photoshop's macOS name.
         assert!(crate::menu_catalog::CATALOG.iter().any(|(_, label, _, i)| *i == id && *label == "Reveal in Finder"));
+    }
+}
+
+#[cfg(test)]
+mod flat_save_tests {
+    use super::flat_save_path;
+    use photocraft_color::{ColorMode, PixelFormat, SampleType};
+    use photocraft_doc::{Document, Layer, LayerContent};
+    use photocraft_engine::Session;
+    use photocraft_geom::Size;
+    use photocraft_raster::Surface;
+
+    fn state(path: &str, layers: Vec<Layer>) -> photocraft_engine::DocState {
+        let mut doc = Document::new("photo", Size::new(2, 2), ColorMode::Rgb, SampleType::U8);
+        doc.layers = layers;
+        let mut session = Session::new();
+        session.add_document(doc, Some(path.to_string()));
+        session.active().unwrap().clone()
+    }
+
+    fn raster(name: &str) -> Layer {
+        Layer::new(name, LayerContent::Raster(Surface::new(PixelFormat::new(ColorMode::Rgb, SampleType::U8, true))))
+    }
+
+    #[test]
+    fn a_plain_flat_file_saves_without_asking_and_a_layered_file_does_not_use_this_path() {
+        let png = state("vscode-host/photo.png", vec![raster("Background")]);
+        assert_eq!(flat_save_path(&png).as_deref(), Some("vscode-host/photo.png"));
+        assert_eq!(flat_save_path(&state("vscode-host/photo.jpg", vec![raster("Background")])).as_deref(), Some("vscode-host/photo.jpg"));
+        assert_eq!(flat_save_path(&state("vscode-host/photo.tif", vec![raster("Background")])).as_deref(), Some("vscode-host/photo.tif"));
+        // Two layers no longer fit in the flat file, so Save must ask for another format.
+        assert!(flat_save_path(&state("vscode-host/photo.png", vec![raster("Background"), raster("Layer 1")])).is_none());
+        let mut dimmed = raster("Background");
+        dimmed.opacity = 0.5;
+        assert!(flat_save_path(&state("vscode-host/photo.png", vec![dimmed])).is_none());
+        // PSD is a layered file: File › Save already writes it in place by another path.
+        assert!(flat_save_path(&state("vscode-host/photo.psd", vec![raster("Background")])).is_none());
+        assert!(flat_save_path(&state("vscode-host/photo.pcraft", vec![raster("Background")])).is_none());
+    }
+
+    #[test]
+    fn a_document_with_no_file_does_not_skip_the_dialog() {
+        let mut doc = Document::new("Untitled-1", Size::new(2, 2), ColorMode::Rgb, SampleType::U8);
+        doc.layers = vec![raster("Background")];
+        let mut session = Session::new();
+        session.add_document(doc, None);
+        assert!(flat_save_path(session.active().unwrap()).is_none());
     }
 }
 

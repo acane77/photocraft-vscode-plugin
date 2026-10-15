@@ -41,7 +41,7 @@ class PhotoCraftProvider {
       localResourceRoots: [mediaUri, fileRoot],
     };
 
-    const session = { panel, document, nonce: null, inlineTried: false };
+    const session = { panel, document, nonce: null, inlineTried: false, saves: new Map() };
     const name = host.baseName(path.posix.basename(document.uri.path));
     const markActive = () => {
       if (panel.active) {
@@ -74,8 +74,12 @@ class PhotoCraftProvider {
         void this.sendBytes(session, name);
         return;
       }
+      if (msg.type === 'save-dialog') {
+        void this.saveDialog(session, msg);
+        return;
+      }
       if (msg.type === 'write') {
-        void this.writeBytes(session, msg.name, msg.data);
+        void this.writeBytes(session, msg);
         return;
       }
       if (msg.type === 'error' && typeof msg.message === 'string' && msg.message) {
@@ -135,9 +139,47 @@ class PhotoCraftProvider {
     }
   }
 
-  async writeBytes(session, rawName, data) {
-    const base = host.baseName(rawName);
-    const bytes = host.asBytes(data);
+  async saveDialog(session, msg) {
+    const id = host.isSaveToken(msg && msg.id) ? msg.id : null;
+    if (!id || !session.nonce) {
+      return;
+    }
+    const suggested = host.baseName(msg.suggested) || 'Untitled.psd';
+    const finish = (fields) => {
+      void session.panel.webview.postMessage({ type: 'save-dialog-result', nonce: session.nonce, id, ...fields });
+    };
+    let picked;
+    try {
+      picked = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.joinPath(session.document.uri, '..', suggested),
+        filters: host.saveFilters(suggested),
+        saveLabel: 'Save',
+      });
+    } catch (err) {
+      const detail = err && err.message ? err.message : String(err);
+      void vscode.window.showErrorMessage(`PhotoCraft could not open the save dialog: ${detail}`);
+      finish({ cancelled: true });
+      return;
+    }
+    if (!picked) {
+      finish({ cancelled: true });
+      return;
+    }
+    const name = host.baseName(path.posix.basename(picked.path));
+    if (!name) {
+      void vscode.window.showErrorMessage('PhotoCraft could not use the chosen file.');
+      finish({ cancelled: true });
+      return;
+    }
+    const token = crypto.randomBytes(16).toString('hex');
+    session.saves.set(token, picked);
+    finish({ token, name });
+  }
+
+  async writeBytes(session, msg) {
+    const dest = msg && msg.dest;
+    const base = host.baseName(msg && msg.name);
+    const bytes = host.asBytes(msg && msg.data);
     if (!base || !bytes || bytes.byteLength === 0) {
       void vscode.window.showErrorMessage('PhotoCraft could not save: the file was empty or unnamed.');
       return;
@@ -146,13 +188,20 @@ class PhotoCraftProvider {
       void vscode.window.showErrorMessage('PhotoCraft: file is too large to save');
       return;
     }
-    const current = host.baseName(path.posix.basename(session.document.uri.path));
-    const target = base === current
-      ? session.document.uri
-      : vscode.Uri.joinPath(session.document.uri, '..', base);
+    let target;
+    if (dest === 'editor') {
+      target = session.document.uri;
+    } else if (host.isSaveToken(dest)) {
+      target = session.saves.get(dest) || null;
+    }
+    if (!target) {
+      void vscode.window.showErrorMessage('PhotoCraft could not save: choose a file in the save dialog.');
+      return;
+    }
     try {
       await vscode.workspace.fs.writeFile(target, bytes);
-      void vscode.window.setStatusBarMessage(`PhotoCraft saved ${base}`, 3000);
+      const saved = host.baseName(path.posix.basename(target.path)) || base;
+      void vscode.window.setStatusBarMessage(`PhotoCraft saved ${saved}`, 3000);
     } catch (err) {
       const detail = err && err.message ? err.message : String(err);
       void vscode.window.showErrorMessage(`PhotoCraft could not save ${base}: ${detail}`);

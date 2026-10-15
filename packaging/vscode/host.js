@@ -46,6 +46,39 @@ function baseName(name) {
   return base;
 }
 
+// The first filter is the one VS Code selects. The suggested file's extension leads.
+function saveFilters(name) {
+  const base = baseName(name) || 'Untitled.psd';
+  const dot = base.lastIndexOf('.');
+  const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : 'psd';
+  const labels = {
+    psd: 'Photoshop',
+    psb: 'Large Document Format',
+    pcraft: 'PhotoCraft',
+    ora: 'OpenRaster',
+    png: 'PNG',
+    jpg: 'JPEG',
+    jpeg: 'JPEG',
+    tif: 'TIFF',
+    tiff: 'TIFF',
+    webp: 'WebP',
+    gif: 'GIF',
+    bmp: 'BMP',
+    tga: 'Targa',
+    svg: 'SVG',
+  };
+  const extensions = ext === 'jpg' || ext === 'jpeg' ? ['jpg', 'jpeg'] : ext === 'tif' || ext === 'tiff' ? ['tif', 'tiff'] : [ext];
+  return {
+    [labels[ext] || 'Image']: extensions,
+    'All Files': ['*'],
+  };
+}
+
+// A save-dialog id or a chosen-file token: 16 random bytes, hex.
+function isSaveToken(value) {
+  return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
+}
+
 function asBytes(data) {
   if (data instanceof Uint8Array) {
     return data;
@@ -157,6 +190,8 @@ module.exports = {
   MAX_HOST_FILE_BYTES,
   findBuild,
   baseName,
+  saveFilters,
+  isSaveToken,
   asBytes,
   editorHtml,
   missingHtml,
@@ -178,6 +213,13 @@ if (require.main === module) {
   );
   assert.strictEqual(findBuild(['only.js']), null);
   assert.strictEqual(findBuild(['a_bg.wasm', 'b_bg.wasm', 'a.js', 'b.js']), null);
+  assert.deepStrictEqual(saveFilters('dir/photo.PSD'), { Photoshop: ['psd'], 'All Files': ['*'] });
+  assert.deepStrictEqual(saveFilters('out.png'), { PNG: ['png'], 'All Files': ['*'] });
+  assert.deepStrictEqual(saveFilters('out.jpg'), { JPEG: ['jpg', 'jpeg'], 'All Files': ['*'] });
+  assert.deepStrictEqual(saveFilters(''), { Photoshop: ['psd'], 'All Files': ['*'] });
+  assert.strictEqual(isSaveToken('a'.repeat(32)), true);
+  assert.strictEqual(isSaveToken('editor'), false);
+  assert.strictEqual(isSaveToken('A'.repeat(32)), false);
   assert.strictEqual(asBytes(Uint8Array.from([4, 5])).length, 2);
   assert.strictEqual(asBytes(new ArrayBuffer(3)).length, 3);
   assert.strictEqual(asBytes({ 0: 1, 1: 2 }), null);

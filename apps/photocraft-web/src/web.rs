@@ -316,23 +316,27 @@ impl WebShell {
 }
 
 impl WebShell {
-    /// Open files the editor host delivered. `open_file` remembers the name, so File › Save
-    /// writes that format back through [`download`] (which the host then stores).
+    /// Open files the editor host delivered. The path marks that document as the editor's
+    /// file, so File › Save writes it back and a different document does not.
     fn open_from_host(&mut self) {
         for (name, bytes) in self.host.take_opens() {
-            if let Err(err) = self.app.open_file(&name, &bytes) {
+            let Ok(path) = crate::host_file::editor_path(&name) else {
+                host::notify_error(&format!("Couldn't open {name}: missing file name"));
+                self.app.open_failed(&name, "missing file name");
+                continue;
+            };
+            if let Err(err) = self.app.open_file(&path, &bytes) {
                 host::notify_error(&format!("Couldn't open {name}: {err}"));
                 self.app.open_failed(&name, &err);
             }
         }
     }
 
-    fn save_for_host(&mut self) {
-        let Some(name) = self.host.save_name() else {
-            host::notify_error("PhotoCraft has not opened a file in this editor yet");
-            return;
-        };
-        if let Err(err) = self.app.save_as(Some(name)) {
+    /// Ctrl+S / Cmd+S runs File › Save for the active document. That writes the editor's
+    /// file only while that document is the one open; a new document asks for a file.
+    fn save_for_host(&mut self, ctx: &egui::Context) {
+        if let Err(err) = photocraft_ui_egui::menus::invoke(&mut self.app, ctx, "file.save", serde_json::json!({})) {
+            let err = if err == "no document" { "PhotoCraft is still opening this file.".to_string() } else { err };
             host::notify_error(&err);
         }
     }
@@ -359,7 +363,7 @@ impl eframe::App for WebShell {
         self.serve_fonts(ctx);
         self.app.logic(ctx, frame);
         if self.host.take_save() {
-            self.save_for_host();
+            self.save_for_host(ctx);
         }
         self.save_presets(ctx);
     }
@@ -432,10 +436,13 @@ fn services(inbox: Inbox) -> Services {
             }),
             // Browser folder handles cannot be represented as filesystem paths for engine commands.
             FileDialogRequest::Folder { .. } => reply.send(None),
-            // No save dialog on the web: the suggested name becomes the download name.
+            // Inside VS Code every save that asks for a file uses the editor's save dialog.
+            // A normal browser has no dialog: the suggested name becomes the download name.
             FileDialogRequest::Save { suggested } => {
-                let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
-                reply.send(Some(FileDialogAnswer::SaveTo(name)));
+                if let Err(reply) = host::ask_save(&suggested, reply) {
+                    let name = std::path::Path::new(&suggested).file_name().map_or_else(|| suggested.clone(), |n| n.to_string_lossy().to_string());
+                    reply.send(Some(FileDialogAnswer::SaveTo(name)));
+                }
             }
         })),
         write: Some(Box::new(|path: &str, bytes: &[u8]| download(path, bytes))),

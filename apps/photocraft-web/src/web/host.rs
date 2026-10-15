@@ -5,25 +5,26 @@
 //! saving keeps the normal download. Messages are ignored unless they echo the nonce
 //! issued at startup, which only the extension received.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use js_sys::Reflect;
+use photocraft_ui_egui::{FileDialogAnswer, FileDialogReply};
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::JsValue;
 
-use crate::host_file::{self, MAX_HOST_FILE_BYTES};
+use crate::host_file::{self, HostSaveDest, MAX_HOST_FILE_BYTES};
 
 /// Files waiting to be opened, and a save asked for by the editor host (Ctrl+S).
 pub struct HostBridge {
     opens: Mutex<Vec<(String, Vec<u8>)>>,
     save: AtomicBool,
-    save_name: Mutex<Option<String>>,
 }
 
 impl HostBridge {
     fn new() -> Self {
-        Self { opens: Mutex::new(Vec::new()), save: AtomicBool::new(false), save_name: Mutex::new(None) }
+        Self { opens: Mutex::new(Vec::new()), save: AtomicBool::new(false) }
     }
 
     pub fn take_opens(&self) -> Vec<(String, Vec<u8>)> {
@@ -35,12 +36,7 @@ impl HostBridge {
         self.save.swap(false, Ordering::Relaxed)
     }
 
-    pub fn save_name(&self) -> Option<String> {
-        self.save_name.lock().unwrap_or_else(|err| err.into_inner()).clone()
-    }
-
     fn queue_open(&self, name: String, bytes: Vec<u8>) {
-        *self.save_name.lock().unwrap_or_else(|err| err.into_inner()) = Some(name.clone());
         self.opens.lock().unwrap_or_else(|err| err.into_inner()).push((name, bytes));
     }
 
@@ -54,6 +50,8 @@ thread_local! {
     /// `acquireVsCodeApi` may be called only once. A missing function must not be probed again
     /// after a failed call, and a successful call is cached above.
     static VSCODE_TRIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Save dialogs waiting on VS Code. One at a time; the id is the nonce we posted.
+    static SAVE_DIALOGS: std::cell::RefCell<HashMap<String, FileDialogReply>> = std::cell::RefCell::new(HashMap::new());
 }
 
 /// Install the channel when this page is a VS Code webview. Otherwise return a bridge
@@ -72,20 +70,49 @@ pub fn install(ctx: egui::Context) -> Arc<HostBridge> {
     bridge
 }
 
+/// Ask VS Code's save dialog for `suggested`. `Err` returns the reply when this page is not
+/// inside VS Code, so the caller keeps the browser download. A cancel answers `None`.
+pub fn ask_save(suggested: &str, reply: FileDialogReply) -> Result<(), FileDialogReply> {
+    let Some(api) = vscode_api() else { return Err(reply) };
+    let Some(id) = random_nonce() else {
+        reply.send(None);
+        notify_error("PhotoCraft could not open the save dialog");
+        return Ok(());
+    };
+    let name = host_file::host_file_name(suggested).unwrap_or_else(|_| "Untitled.psd".to_string());
+    SAVE_DIALOGS.with(|slot| slot.borrow_mut().insert(id.clone(), reply));
+    let id_value = JsValue::from_str(&id);
+    let name_value = JsValue::from_str(&name);
+    if !post(&api, &message("save-dialog", &[("id", &id_value), ("suggested", &name_value)])) {
+        if let Some(pending) = take_save_dialog(&id) {
+            pending.send(None);
+        }
+        notify_error("PhotoCraft could not open the save dialog");
+    }
+    Ok(())
+}
+
 /// Hand `bytes` to the extension instead of a browser download. `false` outside VS Code,
-/// so the caller falls back to the download.
+/// so the caller falls back to the download. Inside VS Code only an in-place save of the
+/// opened file, or a path chosen in the save dialog, is written.
 pub fn publish(path: &str, bytes: &[u8]) -> bool {
     let Some(api) = vscode_api() else { return false };
     if bytes.len() > MAX_HOST_FILE_BYTES {
         notify_error("file is too large to save");
         return true;
     }
-    let Ok(name) = host_file::host_file_name(path) else {
-        notify_error("missing file name");
-        return true;
+    let (dest, name) = match host_file::host_save_dest(path) {
+        Ok(HostSaveDest::Editor { name }) => ("editor".to_string(), name),
+        Ok(HostSaveDest::Picked { token, name }) => (token, name),
+        Err(_) => {
+            notify_error("Choose where to save with VS Code's save dialog");
+            return true;
+        }
     };
     let data = js_sys::Uint8Array::from(bytes);
-    post(&api, &message("write", &[("name", &JsValue::from_str(&name)), ("data", &data)]))
+    let dest_value = JsValue::from_str(&dest);
+    let name_value = JsValue::from_str(&name);
+    post(&api, &message("write", &[("dest", &dest_value), ("name", &name_value), ("data", &data)]))
 }
 
 pub fn notify_error(message_text: &str) {
@@ -120,8 +147,34 @@ fn on_message(bridge: &Arc<HostBridge>, ctx: &egui::Context, api: &JsValue, nonc
             bridge.request_save();
             ctx.request_repaint();
         }
+        "save-dialog-result" => finish_save_dialog(&data),
         _ => {}
     }
+}
+
+fn finish_save_dialog(data: &JsValue) {
+    let Some(id) = string_field(data, "id") else { return };
+    let Some(reply) = take_save_dialog(&id) else { return };
+    if bool_field(data, "cancelled") {
+        reply.send(None);
+        return;
+    }
+    let (Some(token), Some(name)) = (string_field(data, "token"), string_field(data, "name")) else {
+        reply.send(None);
+        notify_error("PhotoCraft could not use the chosen file");
+        return;
+    };
+    match host_file::picked_path(&token, &name) {
+        Ok(path) => reply.send(Some(FileDialogAnswer::SaveTo(path))),
+        Err(_) => {
+            reply.send(None);
+            notify_error("PhotoCraft could not use the chosen file");
+        }
+    }
+}
+
+fn take_save_dialog(id: &str) -> Option<FileDialogReply> {
+    SAVE_DIALOGS.with(|slot| slot.borrow_mut().remove(id))
 }
 
 fn open_from_url(bridge: &Arc<HostBridge>, ctx: &egui::Context, api: &JsValue, data: &JsValue) {
@@ -200,6 +253,10 @@ fn bytes_of(data: JsValue) -> Result<Vec<u8>, String> {
 
 fn string_field(data: &JsValue, key: &str) -> Option<String> {
     Reflect::get(data, &JsValue::from_str(key)).ok()?.as_string()
+}
+
+fn bool_field(data: &JsValue, key: &str) -> bool {
+    Reflect::get(data, &JsValue::from_str(key)).ok().and_then(|value| value.as_bool()).unwrap_or(false)
 }
 
 fn message(kind: &str, fields: &[(&str, &JsValue)]) -> JsValue {
